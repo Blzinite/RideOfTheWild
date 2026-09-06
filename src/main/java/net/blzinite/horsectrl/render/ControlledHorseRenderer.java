@@ -42,8 +42,8 @@ public class ControlledHorseRenderer extends AbstractHorseRenderer<Horse, HorseM
     }
 
     @Override
-    protected void setupRotations(@NotNull Horse horse, @NotNull PoseStack poseStack, float ageInTicks, float rotationYaw, float partialTicks) {
-        super.setupRotations(horse, poseStack, ageInTicks, rotationYaw, partialTicks);
+    protected void setupRotations(Horse horse, PoseStack poseStack, float bob, float yBodyRot, float partialTick, float scale) {
+        super.setupRotations(horse, poseStack, bob, yBodyRot, partialTick, scale);
         if (horse.getControllingPassenger() instanceof Player rider) {
             if (rider.zza >= 0.0 && horse.getDeltaMovement().horizontalDistanceSqr() > 0) {
                 float yawDiff = horse.getYRot() - horse.yHeadRot;

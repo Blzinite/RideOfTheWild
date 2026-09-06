@@ -4,11 +4,11 @@ import net.blzinite.horsectrl.HorseCtrlMod;
 import net.blzinite.horsectrl.entity.ControlledHorseEntity;
 import net.minecraft.world.entity.animal.horse.Horse;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 
-@Mod.EventBusSubscriber
+@EventBusSubscriber
 public class ReplacerEvent {
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {

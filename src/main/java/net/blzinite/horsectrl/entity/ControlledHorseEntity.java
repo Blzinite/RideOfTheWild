@@ -20,13 +20,22 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
 public class ControlledHorseEntity extends Horse {
     // Static Reference
     private static final Style SPUR_FONT = Style.EMPTY.withFont(ResourceLocation.fromNamespaceAndPath("horse_ctrl", "spurs"));
+
+    private static final float WALK_SPEED = 1.0F;
+    private static final float TROT_SPEED = 2.0F;
+    private static final float GALLOP_SPEED = 3.0F;
+    private static final float SPRINT_SPEED = 4.0F;
+    private static final float SPUR_RECHARGE_RATE = 0.004F;
+    private static final float SPRINT_DECAY_RATE = 0.006F;
+    private static final float SPRINT_THRESHOLD = 3.0F;
+    private static final float REAR_SPEED_THRESHOLD = 2.0F;
 
     // Entity Data
     private static final EntityDataAccessor<Float> HEAD_ROTATION = SynchedEntityData.defineId(ControlledHorseEntity.class, EntityDataSerializers.FLOAT);
@@ -36,21 +45,21 @@ public class ControlledHorseEntity extends Horse {
     private static final EntityDataAccessor<Float> SPURS = SynchedEntityData.defineId(ControlledHorseEntity.class, EntityDataSerializers.FLOAT);
 
     // Functional
-    private boolean allowSpur;
+    private boolean spurIsReady;
 
     public ControlledHorseEntity(EntityType<? extends Horse> entityType, Level level) {
         super(entityType, level);
-        allowSpur = false;
+        spurIsReady = false;
     }
 
     @Override
-    protected void defineSynchedData() {
-        super.defineSynchedData();
-        this.entityData.define(HEAD_ROTATION, this.getYRot());
-        this.entityData.define(BODY_ROTATION, this.getYRot());
-        this.entityData.define(SPEED, 0f);
-        this.entityData.define(MAX_SPURS, 2);
-        this.entityData.define(SPURS, 2f);
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(HEAD_ROTATION, this.getYRot());
+        builder.define(BODY_ROTATION, this.getYRot());
+        builder.define(SPEED, 0f);
+        builder.define(MAX_SPURS, 2);
+        builder.define(SPURS, 2f);
     }
 
     // Getters & Setters
@@ -65,50 +74,183 @@ public class ControlledHorseEntity extends Horse {
     public float getSpurs() { return this.entityData.get(SPURS); }
     public void setSpurs(float value) { this.entityData.set(SPURS, value); }
 
-    private void spawnSprintParticles() {
-        if (this.random.nextFloat() < 0.3F) {
-            double x = this.getX() + (this.random.nextDouble() - 0.5D) * this.getBbWidth();
-            double y = this.getY() + 0.1D;
-            double z = this.getZ() + (this.random.nextDouble() - 0.5D) * this.getBbWidth();
 
-            this.level().addParticle(
-                    ParticleTypes.CAMPFIRE_COSY_SMOKE,
-                    x, y, z,
-                    0.0D,
-                    0.05D,
-                    0.0D
-            );
+    private boolean canSpur() {
+        return spurIsReady && getSpurs() > 1;
+    }
+
+    private void consumeSpur() {
+        setSpurs(Math.max(0f, getSpurs() - 1));
+        spurIsReady = false;
+    }
+
+    private void trySpur(float input) {
+        if (input <= 0.2f || !canSpur()) {
+            return;
+        }
+        setCruiseSpeed(SPRINT_SPEED);
+        consumeSpur();
+        playSpurSound();
+    }
+
+    private void rechargeSpur() {
+        float spurs = getSpurs();
+        if (spurs < getMaxSpurs()) {
+            setSpurs(Math.min(
+                    getMaxSpurs(),
+                    spurs + SPUR_RECHARGE_RATE
+            ));
         }
     }
 
-    private void playSpurSound(Level level) {
-        if (!level.isClientSide()) {
-            level.playSound(
-                    null,
-                    this.getX(), this.getY(), this.getZ(),
-                    SoundEvents.PLAYER_SMALL_FALL,
-                    SoundSource.PLAYERS,
-                    1, 0.2f
-            );
-            level.playSound(
-                    null,
-                    this.getX(), this.getY(), this.getZ(),
-                    SoundEvents.HORSE_AMBIENT, SoundSource.PLAYERS,
-                    1, 1
-            );
-        } else {
-            level.playLocalSound(
-                    this.getX(), this.getY(), this.getZ(),
-                    SoundEvents.PLAYER_SMALL_FALL, SoundSource.PLAYERS,
-                    1f, 0.2f,
-                    false
-            );
-            level.playLocalSound(
-                    this.getX(), this.getY(), this.getZ(),
-                    SoundEvents.HORSE_AMBIENT, SoundSource.PLAYERS,
-                    1, 1,
-                    false
-            );
+    private void accelerate(float input) {
+        float speed = getCruiseSpeed();
+
+        if (input == 0f) {
+            setCruiseSpeed(Mth.ceil(speed));
+            return;
+        }
+
+        if (input > 0f) {
+            input *= 0.25f; // slower acceleration, faster deceleration
+        }
+
+        setCruiseSpeed(Mth.clamp(speed + input, 0f, SPRINT_SPEED));
+    }
+
+    private void decelerate(float input) {
+        float speed = getCruiseSpeed();
+        if (speed > REAR_SPEED_THRESHOLD) {
+            spurIsReady = false;
+            makeMad();
+        }
+
+        setCruiseSpeed(Mth.clamp(speed + input, 0f, SPRINT_SPEED));
+    }
+
+    private void updateCruiseSpeed(float input) {
+        float speed = getCruiseSpeed();
+
+        if (input < 0f) {
+            decelerate(input);
+            return;
+        }
+
+        if (speed >= GALLOP_SPEED) {
+            trySpur(input);
+            return;
+        }
+
+        accelerate(input);
+    }
+
+    private void updateHeadRotation(Player rider){
+        float target = getHeadRotation() - 4 * rider.xxa;
+        if (Mth.degreesDifferenceAbs(target, getBodyRotation()) < 30f) {
+            setHeadRotation(target);
+        }
+    }
+
+    @Override
+    protected Vec3 getRiddenInput(Player rider, Vec3 travelVector) {
+        if (this.isStanding() && !this.allowStandSliding) {
+            return Vec3.ZERO;
+        }
+        float input = rider.zza;
+        updateCruiseSpeed(input);
+        updateHeadRotation(rider);
+
+        return new Vec3(0, 0, getCruiseSpeed());
+    }
+
+    private void updateBodyRotation() {
+        float speed = getCruiseSpeed();
+        float rate = Mth.square(5 - speed)/4;
+        setBodyRotation(Mth.approachDegrees(getBodyRotation(), getHeadRotation(), rate));
+    }
+
+    private void updateSprintState() {
+        float speed = getCruiseSpeed();
+        if (speed <= GALLOP_SPEED) {
+            return;
+        }
+        setCruiseSpeed(speed - SPRINT_DECAY_RATE);
+        if (level().isClientSide()) {
+            spawnSprintParticles();
+        }
+    }
+
+    private void updateRidingRotation() {
+        float headHeight = getCruiseSpeed() > GALLOP_SPEED ? 15f : 0f;
+
+        setRot(getBodyRotation(), headHeight);
+        this.yHeadRot = getHeadRotation();
+        this.yRotO = this.yBodyRot = this.getYRot();
+    }
+
+    private void handleLocalRiderState(Vec3 travelVector) {
+        if (travelVector.z <= 0.0) {
+            this.gallopSoundCounter = 0;
+        }
+        if (this.onGround()) {
+            this.setIsJumping(false);
+            if (this.playerJumpPendingScale > 0.0F && !this.isJumping()) {
+                this.executeRidersJump(this.playerJumpPendingScale, travelVector);
+            }
+            this.playerJumpPendingScale = 0.0F;
+        }
+    }
+
+    @Override
+    protected void tickRidden(Player player, Vec3 travelVector) {
+        updateBodyRotation();
+        updateSprintState();
+        rechargeSpur();
+        updateRidingRotation();
+
+        if (this.isControlledByLocalInstance()) {
+            handleLocalRiderState(travelVector);
+        }
+    }
+
+    private void spawnSprintParticles() {
+        if (!level().isClientSide() || random.nextFloat() >= 0.3F) {
+            return;
+        }
+
+        double x = getX() + (random.nextDouble() - 0.5D) * getBbWidth();
+        double y = getY() + 0.1D;
+        double z = getZ() + (random.nextDouble() - 0.5D) * getBbWidth();
+
+        level().addParticle(
+                ParticleTypes.CAMPFIRE_COSY_SMOKE,
+                x, y, z,
+                0.0D,
+                0.05D,
+                0.0D
+        );
+    }
+
+    private void playSpurSound() {
+        this.playSound(SoundEvents.PLAYER_SMALL_FALL, 1f, 0.2f);
+        this.playSound(SoundEvents.HORSE_AMBIENT, 1f, 1f);
+    }
+
+    private void kickNearbyEntities() {
+        AABB area = getBoundingBox().inflate(2.0D);
+
+        List<LivingEntity> kickedEntities = level().getEntitiesOfClass(
+                LivingEntity.class,
+                area,
+                entity ->
+                        entity != this &&
+                                !this.getPassengers().contains(entity)
+        );
+        for (LivingEntity livingEntity : kickedEntities) {
+            livingEntity.knockback(2.4f, Mth.sin((float) (this.getYRot()*(Math.PI/180))), -Mth.cos((float) (this.getYRot()*(Math.PI/180))));
+            float dmg = (float) this.getAttributeValue(Attributes.MAX_HEALTH)
+                    * (float) this.getAttributeValue(Attributes.MOVEMENT_SPEED) * 2.0f;
+            livingEntity.hurt(livingEntity.damageSources().mobAttack(this), dmg);
         }
     }
 
@@ -116,22 +258,16 @@ public class ControlledHorseEntity extends Horse {
     public void setStanding(boolean shouldStand) {
         super.setStanding(shouldStand);
 
-        if (shouldStand) {
-            List<LivingEntity> kickedEntities = level().getEntitiesOfClass(LivingEntity.class, new AABB(this.position(), this.position()).inflate(2), e -> !this.getPassengers().contains(e) && !e.equals(this));
-            for (LivingEntity livingEntity : kickedEntities) {
-                livingEntity.knockback(2.4f, Mth.sin((float) (this.getYRot()*(Math.PI/180))), -Mth.cos((float) (this.getYRot()*(Math.PI/180))));
-                float dmg = (float) this.getAttributeValue(Attributes.MAX_HEALTH)
-                        * (float) this.getAttributeValue(Attributes.MOVEMENT_SPEED) * 2.0f;
-                livingEntity.hurt(livingEntity.damageSources().mobAttack(this), dmg);
-            }
+        if (shouldStand && !level().isClientSide()) {
+            kickNearbyEntities();
         }
     }
 
     @Override
-    public void readAdditionalSaveData(@NotNull CompoundTag tag) {
+    public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
         int maxSpurs = tag.getInt("MaxSpurs");
-        if (maxSpurs == 0) {
+        if (maxSpurs <= 0) {
             setMaxSpurs(this.random.nextIntBetweenInclusive(2, 5));
         } else {
             setMaxSpurs(maxSpurs);
@@ -140,7 +276,7 @@ public class ControlledHorseEntity extends Horse {
     }
 
     @Override
-    public void addAdditionalSaveData(@NotNull CompoundTag tag) {
+    public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putInt("MaxSpurs", getMaxSpurs());
     }
@@ -159,58 +295,6 @@ public class ControlledHorseEntity extends Horse {
     }
 
     @Override
-    protected @NotNull Vec3 getRiddenInput(@NotNull Player rider, @NotNull Vec3 travelVector) {
-        if (this.isStanding() && !this.allowStandSliding) {
-            return Vec3.ZERO;
-        } else {
-            float speed = getCruiseSpeed();
-            float z_input = rider.zza;
-            if (z_input > 0.0F) {
-                z_input *= 0.25F;
-            }
-            float spurs = getSpurs();
-
-            if (z_input < 0.0F) {
-                if (speed > 2) {
-                    allowSpur = false;
-                    this.makeMad();
-                }
-                speed = Mth.clamp(speed+z_input, 0F, 3.0F);
-            } else if (Mth.ceil(speed) >= 3) {
-                if (level().isClientSide) {
-                    String spursDisplay = "\uE000".repeat(Math.max(0, Mth.floor(spurs))) +
-                            "\uE001".repeat(Math.max(0, getMaxSpurs() - Mth.floor(spurs)));
-                    rider.displayClientMessage(Component.literal(spursDisplay).withStyle(SPUR_FONT), true);
-                }
-                if (allowSpur && z_input > 0.2 && spurs >= 1) {
-                    speed = 4;
-                    allowSpur = false;
-                    playSpurSound(level());
-
-                    setSpurs(spurs - 1);
-                }
-            } else {
-                if (z_input == 0) {
-                    speed = Mth.ceil(speed);
-                } else {
-                    speed = Mth.clamp(speed+z_input, 0F, 3.0F);
-                }
-            }
-            setCruiseSpeed(speed);
-
-            float x_input = getHeadRotation() - 4*rider.xxa;
-            if (Mth.degreesDifferenceAbs(x_input, getBodyRotation()) < 30) {
-                setHeadRotation(x_input);
-            }
-
-            if (getCruiseSpeed() <= 0.0F && rider.zza <= 0.0F) {
-                return new Vec3(0, 0, rider.zza*0.25);
-            }
-            return new Vec3(0, 0, getCruiseSpeed());
-        }
-    }
-
-    @Override
     protected void executeRidersJump(float power, Vec3 motion) {
         super.executeRidersJump(power, motion);
         Vec3 look = this.getLookAngle();
@@ -218,44 +302,10 @@ public class ControlledHorseEntity extends Horse {
     }
 
     @Override
-    protected void tickRidden(@NotNull Player player, @NotNull Vec3 travelVector) {
-        float speed = getCruiseSpeed();
-        float rate = Mth.square(5 - speed)/4;
-        setBodyRotation(Mth.approachDegrees(getBodyRotation(), getHeadRotation(), rate));
-
-        float headHeight = 0;
-        if (speed > 3) {
-            setCruiseSpeed(speed - 0.006f);
-            spawnSprintParticles();
-            headHeight = 15;
-        }
-        this.setRot(getBodyRotation(), headHeight);
-        this.yHeadRot = getHeadRotation();
-        this.yRotO = this.yBodyRot = this.getYRot();
-
-        if (getSpurs() < getMaxSpurs()) {
-            setSpurs(getSpurs() + 0.004f);
-        }
-
-        if (this.isControlledByLocalInstance()) {
-            if (travelVector.z <= 0.0) {
-                this.gallopSoundCounter = 0;
-            }
-            if (this.onGround()) {
-                this.setIsJumping(false);
-                if (this.playerJumpPendingScale > 0.0F && !this.isJumping()) {
-                    this.executeRidersJump(this.playerJumpPendingScale, travelVector);
-                }
-                this.playerJumpPendingScale = 0.0F;
-            }
-        }
-    }
-
-    @Override
-    protected float getRiddenSpeed(@NotNull Player player) {
+    protected float getRiddenSpeed(Player player) {
         int speed = Mth.ceil(getCruiseSpeed());
-        if (!allowSpur && speed >= 3 && player.zza < 0.5) {
-            allowSpur = true;
+        if (!spurIsReady && speed >= 3 && player.zza < 0.5) {
+            spurIsReady = true;
         }
         float speedAttribute = (float) this.getAttributeValue(Attributes.MOVEMENT_SPEED);
         return switch(speed) {
@@ -267,18 +317,16 @@ public class ControlledHorseEntity extends Horse {
     }
 
     @Override
-    protected void doPlayerRide(@NotNull Player player) {
+    protected void doPlayerRide(Player player) {
         super.doPlayerRide(player);
         setHeadRotation(this.getYHeadRot());
-        setBodyRotation(this.getBodyRotation());
+        setBodyRotation(this.getYRot());
         setCruiseSpeed(0f);
     }
 
     @Override
-    public SpawnGroupData finalizeSpawn(@NotNull ServerLevelAccessor level,
-                                        @NotNull DifficultyInstance difficulty,
-                                        @NotNull MobSpawnType reason, SpawnGroupData data, CompoundTag tag) {
-        SpawnGroupData result = super.finalizeSpawn(level, difficulty, reason, data, tag);
+    public @Nullable SpawnGroupData finalizeSpawn(ServerLevelAccessor level, DifficultyInstance difficulty, MobSpawnType spawnType, @Nullable SpawnGroupData spawnGroupData) {
+        SpawnGroupData result = super.finalizeSpawn(level, difficulty, spawnType, spawnGroupData);
         setMaxSpurs(this.random.nextIntBetweenInclusive(2, 5));
         setSpurs(getMaxSpurs());
         return result;
