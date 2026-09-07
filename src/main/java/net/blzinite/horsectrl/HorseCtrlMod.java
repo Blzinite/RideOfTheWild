@@ -1,34 +1,23 @@
 package net.blzinite.horsectrl;
 
-import net.blzinite.horsectrl.entity.ControlledHorseEntity;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.MobCategory;
-import net.minecraft.world.entity.animal.horse.Horse;
+import com.mojang.logging.LogUtils;
+import net.blzinite.horsectrl.config.HorseCtrlConfig;
+import net.minecraft.network.chat.Style;
+import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
-import net.neoforged.neoforge.registries.DeferredHolder;
-import net.neoforged.neoforge.registries.DeferredRegister;
+import net.neoforged.fml.config.ModConfig;
+import org.slf4j.Logger;
 
 
 @Mod(HorseCtrlMod.MODID)
 public class HorseCtrlMod {
     public static final String MODID = "horse_ctrl";
-
-    public static final DeferredRegister<EntityType<?>> ENTITY_TYPES = DeferredRegister.create(Registries.ENTITY_TYPE, "minecraft");
-    public static final DeferredHolder<EntityType<?>, EntityType<ControlledHorseEntity>> HORSE = ENTITY_TYPES.register("horse", () ->
-            EntityType.Builder.of(ControlledHorseEntity::new, MobCategory.CREATURE)
-                    .sized(1.3965F, 1.6F)
-                    .build("horse"));
+    public static final Logger LOGGER = LogUtils.getLogger();
+    public static final Style SPUR_FONT = Style.EMPTY.withFont(ResourceLocation.fromNamespaceAndPath("horse_ctrl", "spurs"));
 
     public HorseCtrlMod(IEventBus modEventBus, ModContainer modContainer) {
-        modEventBus.addListener(this::registerAttributes);
-        ENTITY_TYPES.register(modEventBus);
-    }
-
-    public void registerAttributes(EntityAttributeCreationEvent event) {
-        event.put(HORSE.get(), Horse.createBaseHorseAttributes().build());
+        modContainer.registerConfig(ModConfig.Type.COMMON, HorseCtrlConfig.SPEC);
     }
 }

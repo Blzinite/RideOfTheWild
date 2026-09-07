@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "package": "net.blzinite.horsectrl.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "common.HorseMixin",
+    "common.LivingEntityMixin"
+  ],
+  "client": [
+    "client.HorseModelMixin",
+    "client.HorseRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
