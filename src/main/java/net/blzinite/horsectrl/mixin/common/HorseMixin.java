@@ -125,9 +125,9 @@ public abstract class HorseMixin implements HorseControlAccess {
     // ============================================================
     @Inject(method = "defineSynchedData", at = @At("TAIL"))
     private void horseCtrl$defineSynchedData(SynchedEntityData.Builder builder, CallbackInfo ci) {
-        if (!HorseCtrlConfig.isControlledMount(this)) {
-            return;
-        }
+//        if (!HorseCtrlConfig.isControlledMount(this)) {
+//            return;
+//        } // Was preventing other childs from spawning properly, data had to be added to all
         builder.define(HORSE_CTRL_HEAD_ROTATION, 0.0F);
         builder.define(HORSE_CTRL_BODY_ROTATION, 0.0F);
         builder.define(HORSE_CTRL_SPEED, 0.0F);
