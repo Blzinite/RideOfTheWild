@@ -18,13 +18,13 @@
 
 **If you have a strong opinion about any of these features leave a comment to let me know**
 
-*   Ride without saddle (Available on 1.21.1)
-*   Apply to skeleton & zombie horses (Available on 1.21.1)
-*   Mobs also knows how to ride
+*   Ride without saddle (Implemented on 1.21.1, 2.0.0+)
+*   Apply to skeleton & zombie horses (Implemented on 1.21.1, 2.0.0+)
+*   Mobs also knows how to ride (Implemented on 1.21.1, 2.1.0+)
 *   Horse different size, larger horse can carry passenger (Modded horses can be used if added in the config, was gonna test with RHG but it hasn't been ported to 1.21.1)
 
 ## ⚠️Incompatible with third person mods which adjusts player movements
-Compatible with shoulder surf reloaded on v1.0.2!
+Compatible with shoulder surf reloaded on v1.0.2! (Probably not since 2.0.0)
 
 ## ✨Suggested Combinations
 

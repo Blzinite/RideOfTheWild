@@ -21,6 +21,8 @@ public class HorseCtrlConfig {
     private static final ModConfigSpec.IntValue SPRINT_DECAY_RATE;
     private static final ModConfigSpec.BooleanValue ALLOW_BAREBACK;
     private static final ModConfigSpec.ConfigValue<List<? extends String>> MOUNT_LIST;
+    private static final ModConfigSpec.DoubleValue REAR_DAMAGE_MULTIPLIER;
+    private static final ModConfigSpec.DoubleValue TRAMPLE_DAMAGE;
 
     public static final ModConfigSpec SPEC;
 
@@ -39,6 +41,9 @@ public class HorseCtrlConfig {
                                 "minecraft:zombie_horse"
                         ),
                         () -> "minecraft:horse", HorseCtrlConfig::validateEntity);
+        REAR_DAMAGE_MULTIPLIER = BUILDER.comment("This damage scales from the horse's max hp, set to 0 to disable kicking damage")
+                .defineInRange("rear_dmg_multiplier", 0.5, 0, Double.MAX_VALUE);
+        TRAMPLE_DAMAGE = BUILDER.comment("The amount of damage the horse deal when in gallop mode, set to 0 to disable").defineInRange("trample_damage", 5, 0, Double.MAX_VALUE);
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -53,6 +58,8 @@ public class HorseCtrlConfig {
     public static float spurRechargeRate;
     public static float sprintDecayRate;
     private static Set<EntityType<?>> mountList;
+    public static double rearDamageMultiplier;
+    public static double trampleDamage;
 
     @SubscribeEvent
     static void onLoad(final ModConfigEvent configEvent) {
@@ -62,6 +69,8 @@ public class HorseCtrlConfig {
         mountList = MOUNT_LIST.get().stream()
             .map(entityType -> BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.parse(entityType)))
             .collect(Collectors.toSet());
+        rearDamageMultiplier = REAR_DAMAGE_MULTIPLIER.get();
+        trampleDamage = TRAMPLE_DAMAGE.get();
     }
 
 

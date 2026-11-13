@@ -13,9 +13,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.DifficultyInstance;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.MobSpawnType;
-import net.minecraft.world.entity.SpawnGroupData;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.player.Player;
@@ -35,6 +33,18 @@ import java.util.List;
 
 @Mixin(AbstractHorse.class)
 public abstract class HorseMixin implements HorseControlAccess {
+
+    // ============================================================
+    // Circling AI constants
+    // ============================================================
+    @Unique
+    private static final double HORSE_CTRL_ORBIT_RADIUS = 6.0;
+    @Unique
+    private static final double HORSE_CTRL_ORBIT_GAIN = 0.15;
+    @Unique
+    private static final float HORSE_CTRL_ORBIT_TURN_RATE = 4.0f;
+    @Unique
+    private int horseCtrl$orbitDirection = 1;
 
     // ============================================================
     // Shadows
@@ -62,7 +72,7 @@ public abstract class HorseMixin implements HorseControlAccess {
     @Unique
     private static final EntityDataAccessor<Float> HORSE_CTRL_BODY_ROTATION = SynchedEntityData.defineId(AbstractHorse.class, EntityDataSerializers.FLOAT);
     @Unique
-    private static final EntityDataAccessor<Float> HORSE_CTRL_SPEED = SynchedEntityData.defineId(AbstractHorse.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> HORSE_CTRL_SPEED = SynchedEntityData.defineId(AbstractHorse.class, EntityDataSerializers.INT);
     @Unique
     private static final EntityDataAccessor<Integer> HORSE_CTRL_MAX_SPURS = SynchedEntityData.defineId(AbstractHorse.class, EntityDataSerializers.INT);
     @Unique
@@ -72,9 +82,13 @@ public abstract class HorseMixin implements HorseControlAccess {
     // Per-horse state
     // ============================================================
     @Unique
-    private boolean horseCtrl$spurIsReady = false;
+    private float horseCtrl$cruiseSpeed = 0f;
     @Unique
     private float horseCtrl$lean = 0.0F;
+    @Unique
+    private float horseCtrl$forwardInput = 0f;
+    @Unique
+    private boolean horseCtrl$sprintRequested = false;
 
     // ============================================================
     // Accessors
@@ -108,9 +122,21 @@ public abstract class HorseMixin implements HorseControlAccess {
     @Unique
     private void horseCtrl$setBodyRotation(float rotation) {horseCtrl$self().getEntityData().set(HORSE_CTRL_BODY_ROTATION, rotation);}
     @Unique
-    private float horseCtrl$getCruiseSpeed() {return horseCtrl$self().getEntityData().get(HORSE_CTRL_SPEED);}
+    private float horseCtrl$getCruiseSpeed() {return horseCtrl$cruiseSpeed;}
     @Unique
-    private void horseCtrl$setCruiseSpeed(float speed) {horseCtrl$self().getEntityData().set(HORSE_CTRL_SPEED, speed);}
+    private void horseCtrl$setCruiseSpeed(float speed) {
+        AbstractHorse horse = horseCtrl$self();
+        if (horse.level().isClientSide()) return;
+        horseCtrl$cruiseSpeed = Mth.clamp(speed, 0f, 4f);
+        int gear = Mth.ceil(horseCtrl$cruiseSpeed);
+        if (horse.getEntityData().get(HORSE_CTRL_SPEED) != gear) {
+            horse.getEntityData().set(HORSE_CTRL_SPEED, gear);
+        }
+    }
+    @Unique
+    private int horseCtrl$getGear() {
+        return horseCtrl$self().getEntityData().get(HORSE_CTRL_SPEED);
+    }
     @Unique
     private int horseCtrl$getMaxSpurs() {return horseCtrl$self().getEntityData().get(HORSE_CTRL_MAX_SPURS);}
     @Unique
@@ -130,7 +156,7 @@ public abstract class HorseMixin implements HorseControlAccess {
 //        } // Was preventing other childs from spawning properly, data had to be added to all
         builder.define(HORSE_CTRL_HEAD_ROTATION, 0.0F);
         builder.define(HORSE_CTRL_BODY_ROTATION, 0.0F);
-        builder.define(HORSE_CTRL_SPEED, 0.0F);
+        builder.define(HORSE_CTRL_SPEED, 0);
         builder.define(HORSE_CTRL_MAX_SPURS, 2);
         builder.define(HORSE_CTRL_SPURS, 2.0F);
     }
@@ -140,25 +166,22 @@ public abstract class HorseMixin implements HorseControlAccess {
     // ============================================================
     @Unique
     private boolean horseCtrl$canSpur() {
-        return horseCtrl$spurIsReady && horseCtrl$getSpurs() > 1;
+        return horseCtrl$getSpurs() >= 1;
     }
 
     @Unique
     private void horseCtrl$consumeSpur() {
         horseCtrl$setSpurs(Math.max(0f, horseCtrl$getSpurs() - 1f));
-        horseCtrl$spurIsReady = false;
     }
 
     @Unique
-    private void horseCtrl$trySpur(Player rider) {
-        float input = rider.zza;
+    private void horseCtrl$trySpur() {
+        if (horseCtrl$getCruiseSpeed() < Speeds.GALLOP.getValue()) return;
         if (!horseCtrl$canSpur()) return;
 
-        if (input > 0.2f || rider.isSprinting()) { // Ctrl to speed up doesn't work :(
-            horseCtrl$setCruiseSpeed(Speeds.SPRINT.getValue());
-            horseCtrl$consumeSpur();
-            horseCtrl$playSpurSound();
-        }
+        horseCtrl$setCruiseSpeed(Speeds.SPRINT.getValue());
+        horseCtrl$consumeSpur();
+        horseCtrl$playSpurSound();
     }
 
     @Unique
@@ -174,7 +197,7 @@ public abstract class HorseMixin implements HorseControlAccess {
 
     @Unique
     private void horseCtrl$renderSpurs(Player rider) {
-        if (rider.level().isClientSide && horseCtrl$getCruiseSpeed() >= Speeds.GALLOP.getValue()) {
+        if (rider.level().isClientSide && horseCtrl$getGear() >= Speeds.GALLOP.getValue()) {
             float spurs = horseCtrl$getSpurs();
             String spursDisplay = "\uE000".repeat(Math.max(0, Mth.floor(spurs))) +
                     "\uE001".repeat(Math.max(0, horseCtrl$getMaxSpurs() - Mth.floor(spurs)));
@@ -198,7 +221,7 @@ public abstract class HorseMixin implements HorseControlAccess {
             input *= 0.25f;
         }
 
-        horseCtrl$setCruiseSpeed(Mth.clamp(speed + input, 0f, Speeds.SPRINT.getValue()));
+        horseCtrl$setCruiseSpeed(Mth.clamp(speed + input, 0f, Speeds.GALLOP.getValue()));
     }
 
     @Unique
@@ -206,7 +229,6 @@ public abstract class HorseMixin implements HorseControlAccess {
         float speed = horseCtrl$getCruiseSpeed();
 
         if (speed > HorseCtrlConfig.rearSpeedThreshold) {
-            horseCtrl$spurIsReady = false;
             horseCtrl$self().makeMad();
             speed = 0;
         }
@@ -215,8 +237,7 @@ public abstract class HorseMixin implements HorseControlAccess {
     }
 
     @Unique
-    private void horseCtrl$updateCruiseSpeed(Player rider) {
-        float input = rider.zza;
+    private void horseCtrl$updateCruiseSpeed(float input) {
         float speed = horseCtrl$getCruiseSpeed();
 
         if (input < 0f) {
@@ -225,30 +246,119 @@ public abstract class HorseMixin implements HorseControlAccess {
         }
 
         if (speed >= Speeds.GALLOP.getValue()) {
-            horseCtrl$trySpur(rider);
             return;
         }
 
         horseCtrl$accelerate(input);
     }
 
+    @Unique
+    private void horseCtrl$updateCoasting() {
+
+        if (horseCtrl$cruiseSpeed <= 0f) {
+            horseCtrl$cruiseSpeed = 0;
+            return;
+        }
+        horseCtrl$cruiseSpeed -= 0.25f;
+        float speed = (float) (horseCtrl$cruiseSpeed * horseCtrl$self().getAttributeValue(Attributes.MOVEMENT_SPEED));
+        horseCtrl$self().setSpeed(speed);
+        horseCtrl$self().travel(new Vec3(0, 0, 1));
+    }
+
+    @Unique
+    private void horseCtrl$updateMobCircling(Mob rider) {
+        AbstractHorse horse = horseCtrl$self();
+        LivingEntity target = rider.getTarget();
+
+        if (target != null && target.isAlive()) {
+            double dx = target.getX() - horse.getX();
+            double dz = target.getZ() - horse.getZ();
+
+            double distanceSqr = dx * dx + dz * dz;
+            if (distanceSqr < 0.0001) return;
+
+            double distance = Math.sqrt(distanceSqr);
+
+            double tx = dx / distance;
+            double tz = dz / distance;
+
+            float yaw = horseCtrl$getBodyRotation() * Mth.DEG_TO_RAD;
+            double fx = -Mth.sin(yaw);
+            double fz = Mth.cos(yaw);
+            double dot = fx * tx + fz * tz;
+            double radiusError = distance - HORSE_CTRL_ORBIT_RADIUS;
+
+            double desiredDot = Mth.clamp(
+                    radiusError * HORSE_CTRL_ORBIT_GAIN,
+                    -0.6,
+                    0.6
+            );
+            double error = desiredDot - dot;
+
+            double cross = fx * tz - fz * tx;
+
+
+            double side = Math.abs(cross) > 0.05 ? Math.signum(cross) : horseCtrl$orbitDirection;
+
+            float turn = (float) Mth.clamp(
+                    error * side * HORSE_CTRL_ORBIT_TURN_RATE,
+                    -HORSE_CTRL_ORBIT_TURN_RATE,
+                    HORSE_CTRL_ORBIT_TURN_RATE
+            );
+
+            horseCtrl$setHeadRotation(horseCtrl$getHeadRotation() + turn);
+            float speed = (float) horseCtrl$self().getAttributeValue(Attributes.MOVEMENT_SPEED);
+            horseCtrl$self().setSpeed(speed);
+            horseCtrl$self().travel(new Vec3(0, 0, 1));
+
+            horseCtrl$updateBodyRotation();
+            horseCtrl$updateRidingRotation();
+        }
+    }
+
+
+    @Override
+    public void horseCtrl$receiveInput(float forward, float right, float yaw, boolean sprintPressed) {
+        AbstractHorse horse = horseCtrl$self();
+
+        if (horse.level().isClientSide()) return;
+
+        horseCtrl$forwardInput = Mth.clamp(forward, -1f, 1f);
+
+        if (sprintPressed) {
+            horseCtrl$sprintRequested = true;
+        }
+
+        horseCtrl$updateHeadRotation(right, yaw);
+    }
+
 
     // ============================================================
     // Head / body rotation
     // ============================================================
-
     @Unique
-    private void horseCtrl$updateHeadRotation(Player rider) {
-        float target = horseCtrl$getHeadRotation() - 4 * rider.xxa;
-        if (Mth.degreesDifferenceAbs(target, horseCtrl$getBodyRotation()) < 30) {
-            horseCtrl$setHeadRotation(target);
+    private void horseCtrl$updateHeadRotation(float right, float yaw) {
+        float current = horseCtrl$getHeadRotation();
+        float body = horseCtrl$getBodyRotation();
+
+        float target;
+
+        if (horseCtrl$forwardInput > 0f) {
+            target = yaw;
+        } else {
+            target = current - 4f * right;
         }
+
+        float difference = Mth.wrapDegrees(target - body);
+        difference = Mth.clamp(difference, -30f, 30f);
+
+        horseCtrl$setHeadRotation(body + difference);
     }
 
     @Unique
     private void horseCtrl$updateBodyRotation() {
         float speed = horseCtrl$getCruiseSpeed();
-        float rate = Mth.square(5f - speed) / 2f;
+        float rate = Mth.square(5f - speed) * 0.8f;
         horseCtrl$setBodyRotation(Mth.approachDegrees(horseCtrl$getBodyRotation(), horseCtrl$getHeadRotation(), rate));
     }
 
@@ -274,9 +384,30 @@ public abstract class HorseMixin implements HorseControlAccess {
             return;
         }
 
-        horseCtrl$setCruiseSpeed(speed - HorseCtrlConfig.sprintDecayRate);
+        horseCtrl$setCruiseSpeed(Math.max(Speeds.GALLOP.getValue(), speed - HorseCtrlConfig.sprintDecayRate));
         horseCtrl$spawnSprintParticles();
     }
+
+    @Unique
+    private void horseCtrl$trample() {
+        AbstractHorse horse = horseCtrl$self();
+        if (!horse.level().isClientSide() && horseCtrl$getGear() > Speeds.GALLOP.getValue() && HorseCtrlConfig.trampleDamage > 0) {
+            AABB area = horse.getBoundingBox().inflate(1.2D);
+
+            List<LivingEntity> kickedEntities = horse.level().getEntitiesOfClass(
+                    LivingEntity.class,
+                    area,
+                    entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity)
+            );
+
+            for (LivingEntity livingEntity : kickedEntities) {
+                livingEntity.knockback(2.5, Mth.sin((float) (horse.getYRot() * (Math.PI / 180))), -Mth.cos((float) (horse.getYRot() * (Math.PI / 180))));
+                float damage = (float) (HorseCtrlConfig.trampleDamage);
+                livingEntity.hurt(livingEntity.damageSources().mobAttack(horse), damage);
+            }
+        }
+    }
+
 
     @Unique
     private void horseCtrl$spawnSprintParticles() {
@@ -299,7 +430,6 @@ public abstract class HorseMixin implements HorseControlAccess {
     // ============================================================
     // Spur sound
     // ============================================================
-
     @Unique
     private void horseCtrl$playSpurSound() {
         AbstractHorse horse = horseCtrl$self();
@@ -333,14 +463,13 @@ public abstract class HorseMixin implements HorseControlAccess {
             return;
         }
 
-
-        float swim = horse.isInWater() && horse.getFluidTypeHeight(NeoForgeMod.WATER_TYPE.value()) > 0 ? 0.2f : 0f;
         horseCtrl$renderSpurs(rider);
-        horseCtrl$updateCruiseSpeed(rider);
-        horseCtrl$updateHeadRotation(rider);
-        float speed = horseCtrl$getCruiseSpeed();
+
+        float swim = horse.isInWater() && horse.getFluidTypeHeight(NeoForgeMod.WATER_TYPE.value()) > 0 ? 0.3f : 0f;
+
+        int speed = horseCtrl$getGear();
         if (speed <= 0 && rider.zza < 0) {
-            cir.setReturnValue(new Vec3(0, swim, rider.zza * 0.2));
+            cir.setReturnValue(new Vec3(0, swim, rider.zza * 0.2)); // Backup
         } else {
             cir.setReturnValue(new Vec3(0, swim, speed));
         }
@@ -355,18 +484,48 @@ public abstract class HorseMixin implements HorseControlAccess {
     // ============================================================
     // Ridden tick
     // ============================================================
+    @Inject(method = "tick", at = @At("HEAD"))
+    private void horseCtrl$tick(CallbackInfo ci) {
+        if (!HorseCtrlConfig.isControlledMount(this)) {
+            return;
+        }
+
+        AbstractHorse horse = horseCtrl$self();
+        if (!horse.level().isClientSide()) {
+            Entity rider = horse.getFirstPassenger();
+            if (rider instanceof Mob mob) {
+                horseCtrl$updateMobCircling(mob);
+            } else if (rider == null && horseCtrl$cruiseSpeed > 0) {
+                horseCtrl$updateCoasting();
+            }
+        }
+
+    }
+
+
     @Inject(method = "tickRidden", at = @At("HEAD"), cancellable = true)
     private void horseCtrl$tickRidden(Player player, Vec3 travelVector, CallbackInfo ci) {
         if (!HorseCtrlConfig.isControlledMount(this)) {
             return;
         }
 
+        AbstractHorse horse = horseCtrl$self();
+
+        if (!horse.level().isClientSide()) {
+            horseCtrl$updateCruiseSpeed(horseCtrl$forwardInput);
+
+            if (horseCtrl$sprintRequested) {
+                horseCtrl$sprintRequested = false;
+                horseCtrl$trySpur();
+            }
+            horseCtrl$updateSprintState();
+            horseCtrl$rechargeSpur();
+            horseCtrl$trample();
+        }
+
         horseCtrl$updateBodyRotation();
-        horseCtrl$updateSprintState();
-        horseCtrl$rechargeSpur();
         horseCtrl$updateRidingRotation();
 
-        AbstractHorse horse = horseCtrl$self();
 
         if (horse.isControlledByLocalInstance()) {
             if (travelVector.z <= 0) {
@@ -397,11 +556,7 @@ public abstract class HorseMixin implements HorseControlAccess {
             return;
         }
 
-        int speed = Mth.ceil(horseCtrl$getCruiseSpeed());
-
-        if (!horseCtrl$spurIsReady && speed >= 3 && player.zza < 0.5f) {
-            horseCtrl$spurIsReady = true;
-        }
+        int speed = horseCtrl$getGear();
 
         float speedAttribute = (float) horseCtrl$self().getAttributeValue(Attributes.MOVEMENT_SPEED);
 
@@ -429,14 +584,13 @@ public abstract class HorseMixin implements HorseControlAccess {
 
         AbstractHorse horse = horseCtrl$self();
         Vec3 look = horse.getLookAngle();
-        horse.setDeltaMovement(horse.getDeltaMovement().add(look.x * 0.3, 0, look.z * 0.3));
+        horse.setDeltaMovement(horse.getDeltaMovement().add(look.x * 0.5, 0, look.z * 0.5));
     }
 
 
     // ============================================================
     // Player mounting
     // ============================================================
-
     @Inject(method = "doPlayerRide", at = @At("TAIL"))
     private void horseCtrl$doPlayerRide(Player player, CallbackInfo ci) {
         if (!HorseCtrlConfig.isControlledMount(this)) {
@@ -453,7 +607,6 @@ public abstract class HorseMixin implements HorseControlAccess {
     // ============================================================
     // Standing / kick
     // ============================================================
-
     @Inject(method = "setStanding", at = @At("TAIL"))
     private void horseCtrl$setStanding(boolean shouldStand, CallbackInfo ci) {
         if (!HorseCtrlConfig.isControlledMount(this)) {
@@ -462,22 +615,23 @@ public abstract class HorseMixin implements HorseControlAccess {
 
         AbstractHorse horse = horseCtrl$self();
 
-        if (horse.level().isClientSide()) {
+        if (horse.level().isClientSide() || HorseCtrlConfig.rearDamageMultiplier <= 0) {
             return;
         }
+        if (shouldStand) {
+            AABB area = horse.getBoundingBox().inflate(2.0D);
 
-        AABB area = horse.getBoundingBox().inflate(2.0D);
+            List<LivingEntity> kickedEntities = horse.level().getEntitiesOfClass(
+                    LivingEntity.class,
+                    area,
+                    entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity)
+            );
 
-        List<LivingEntity> kickedEntities = horse.level().getEntitiesOfClass(
-                LivingEntity.class,
-                area,
-                entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity)
-        );
-
-        for (LivingEntity livingEntity : kickedEntities) {
-            livingEntity.knockback(2.4f, Mth.sin((float) (horse.getYRot()*(Math.PI/180))), -Mth.cos((float) (horse.getYRot()*(Math.PI/180))));
-            float damage = (float) (horse.getAttributeValue(Attributes.MAX_HEALTH) * horse.getAttributeValue(Attributes.MOVEMENT_SPEED) * 2.0F);
-            livingEntity.hurt(livingEntity.damageSources().mobAttack(horse), damage);
+            for (LivingEntity livingEntity : kickedEntities) {
+                livingEntity.knockback(2.4f, Mth.sin((float) (horse.getYRot()*(Math.PI/180))), -Mth.cos((float) (horse.getYRot()*(Math.PI/180))));
+                float damage = (float) (horse.getAttributeValue(Attributes.MAX_HEALTH) * HorseCtrlConfig.rearDamageMultiplier);
+                livingEntity.hurt(livingEntity.damageSources().mobAttack(horse), damage);
+            }
         }
     }
 
