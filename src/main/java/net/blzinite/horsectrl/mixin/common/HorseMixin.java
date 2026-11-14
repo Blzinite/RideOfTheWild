@@ -40,7 +40,7 @@ public abstract class HorseMixin implements HorseControlAccess {
     @Unique
     private static final double HORSE_CTRL_ORBIT_RADIUS = 6.0;
     @Unique
-    private static final double HORSE_CTRL_ORBIT_GAIN = 0.15;
+    private static final double HORSE_CTRL_ORBIT_GAIN = 0.05;
     @Unique
     private static final float HORSE_CTRL_ORBIT_TURN_RATE = 4.0f;
     @Unique
@@ -151,9 +151,6 @@ public abstract class HorseMixin implements HorseControlAccess {
     // ============================================================
     @Inject(method = "defineSynchedData", at = @At("TAIL"))
     private void horseCtrl$defineSynchedData(SynchedEntityData.Builder builder, CallbackInfo ci) {
-//        if (!HorseCtrlConfig.isControlledMount(this)) {
-//            return;
-//        } // Was preventing other childs from spawning properly, data had to be added to all
         builder.define(HORSE_CTRL_HEAD_ROTATION, 0.0F);
         builder.define(HORSE_CTRL_BODY_ROTATION, 0.0F);
         builder.define(HORSE_CTRL_SPEED, 0);
@@ -265,6 +262,25 @@ public abstract class HorseMixin implements HorseControlAccess {
         horseCtrl$self().travel(new Vec3(0, 0, 1));
     }
 
+
+    @Override
+    public void horseCtrl$receiveInput(float forward, float right, float yaw, boolean sprintPressed) {
+        AbstractHorse horse = horseCtrl$self();
+
+        if (horse.level().isClientSide()) return;
+
+        horseCtrl$forwardInput = Mth.clamp(forward, -1f, 1f);
+
+        if (sprintPressed) {
+            horseCtrl$sprintRequested = true;
+        }
+
+        horseCtrl$updateHeadRotation(right, yaw);
+    }
+
+    // ============================================================
+    // AI Tweaks
+    // ============================================================
     @Unique
     private void horseCtrl$updateMobCircling(Mob rider) {
         AbstractHorse horse = horseCtrl$self();
@@ -297,7 +313,6 @@ public abstract class HorseMixin implements HorseControlAccess {
 
             double cross = fx * tz - fz * tx;
 
-
             double side = Math.abs(cross) > 0.05 ? Math.signum(cross) : horseCtrl$orbitDirection;
 
             float turn = (float) Mth.clamp(
@@ -305,33 +320,22 @@ public abstract class HorseMixin implements HorseControlAccess {
                     -HORSE_CTRL_ORBIT_TURN_RATE,
                     HORSE_CTRL_ORBIT_TURN_RATE
             );
+            if (Math.abs(turn) > 1) {
+                horseCtrl$setHeadRotation(horseCtrl$getHeadRotation() + turn);
+            }
 
-            horseCtrl$setHeadRotation(horseCtrl$getHeadRotation() + turn);
+
+            horseCtrl$cruiseSpeed = 3f;
             float speed = (float) horseCtrl$self().getAttributeValue(Attributes.MOVEMENT_SPEED);
             horseCtrl$self().setSpeed(speed);
             horseCtrl$self().travel(new Vec3(0, 0, 1));
 
             horseCtrl$updateBodyRotation();
             horseCtrl$updateRidingRotation();
+        } else if (horseCtrl$cruiseSpeed > 0) {
+            horseCtrl$updateCoasting();
         }
     }
-
-
-    @Override
-    public void horseCtrl$receiveInput(float forward, float right, float yaw, boolean sprintPressed) {
-        AbstractHorse horse = horseCtrl$self();
-
-        if (horse.level().isClientSide()) return;
-
-        horseCtrl$forwardInput = Mth.clamp(forward, -1f, 1f);
-
-        if (sprintPressed) {
-            horseCtrl$sprintRequested = true;
-        }
-
-        horseCtrl$updateHeadRotation(right, yaw);
-    }
-
 
     // ============================================================
     // Head / body rotation
@@ -385,7 +389,6 @@ public abstract class HorseMixin implements HorseControlAccess {
         }
 
         horseCtrl$setCruiseSpeed(Math.max(Speeds.GALLOP.getValue(), speed - HorseCtrlConfig.sprintDecayRate));
-        horseCtrl$spawnSprintParticles();
     }
 
     @Unique
@@ -413,17 +416,16 @@ public abstract class HorseMixin implements HorseControlAccess {
     private void horseCtrl$spawnSprintParticles() {
         AbstractHorse horse = horseCtrl$self();
 
-        if (!horse.level().isClientSide() || horse.getRandom().nextFloat() >= 0.3f) {
-            return;
-        }
-        double x = horse.getX() + (horse.getRandom().nextDouble() - 0.5) * horse.getBbWidth();
-        double y = horse.getY() + 0.1;
-        double z = horse.getZ() + (horse.getRandom().nextDouble() - 0.5) * horse.getBbWidth();
+        if (horse.level().isClientSide() && horse.getRandom().nextFloat() < 0.3f && horse.onGround()) {
+            double x = horse.getX() + (horse.getRandom().nextDouble() - 0.5) * horse.getBbWidth();
+            double y = horse.getY() + 0.1;
+            double z = horse.getZ() + (horse.getRandom().nextDouble() - 0.5) * horse.getBbWidth();
 
-        horse.level().addParticle(ParticleTypes.CAMPFIRE_COSY_SMOKE,
-                x, y, z,
-                0, 0.05, 0
-        );
+            horse.level().addParticle(ParticleTypes.CAMPFIRE_COSY_SMOKE,
+                    x, y, z,
+                    0, 0.05, 0
+            );
+        }
     }
 
 
@@ -528,6 +530,9 @@ public abstract class HorseMixin implements HorseControlAccess {
 
 
         if (horse.isControlledByLocalInstance()) {
+            if (horseCtrl$getGear() > Speeds.GALLOP.getValue()) {
+                horseCtrl$spawnSprintParticles();
+            }
             if (travelVector.z <= 0) {
                 this.gallopSoundCounter = 0;
             }
