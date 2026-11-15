@@ -3,6 +3,7 @@ plugins {
     id 'idea'
     id 'maven-publish'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'org.spongepowered.mixin' version '0.7.+'
 }
 
 version = mod_version
@@ -113,6 +114,7 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 repositories {
     mavenCentral()
+    maven { url = 'https://repo.spongepowered.org/maven' }
     maven {
         url = "https://cursemaven.com"
     }
@@ -128,8 +130,8 @@ dependencies {
 
     compileOnly "curse.maven:shoulder-surfing-reloaded-243190:6993788"
 
-    // For runtime (when playing/test) load the full mod:
-//    runtimeOnly "curse.maven:shoulder-surfing-reloaded-243190:6993788"
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
     // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
@@ -145,6 +147,11 @@ dependencies {
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+}
+
+mixin {
+    add sourceSets.main, 'horse_ctrl.refmap.json'
+    config 'horse_ctrl.mixins.json'
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
@@ -168,6 +175,7 @@ tasks.named('processResources', ProcessResources).configure {
 
 // Example for how to get properties into the manifest for reading at runtime.
 tasks.named('jar', Jar).configure {
+    archiveFileName = "${minecraft_version}-${mod_id}-${mod_version}.jar"
     manifest {
         attributes([
                 'Specification-Title'     : mod_id,
