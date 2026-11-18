@@ -20,14 +20,19 @@ public class HorseRendererMixin<T extends LivingEntity> {
     private void horseCtrl$setupRotations(T entity, PoseStack poseStack, float bob, float yBodyRot, float partialTick, float scale, CallbackInfo ci) {
         if (HorseCtrlConfig.isControlledMount(entity) && entity instanceof AbstractHorse horse) {
             if (horse.getControllingPassenger() instanceof Player rider) {
-                if (rider.zza >= 0.0 && horse.getDeltaMovement().horizontalDistanceSqr() > 0) {
-                    float yawDiff = horse.getYRot() - horse.yHeadRot;
-                    float leanAngle = Mth.clamp(yawDiff * 2, -5.0f, 5.0f);
+                if (rider.zza >= 0.0 && horse.getDeltaMovement().horizontalDistanceSqr() > 0.1) {
                     HorseControlAccess access = (HorseControlAccess) horse;
-                    float lean = access.horseCtrl$getLean();
-                    lean += (leanAngle - lean) * 0.2F;
-                    access.horseCtrl$setLean(lean);
-                    poseStack.mulPose(Axis.ZP.rotationDegrees(lean));
+                    if (!horse.onGround()) {
+                        access.horseCtrl$setLean(0);
+                        poseStack.mulPose(Axis.XP.rotationDegrees((float) (horse.getDeltaMovement().y() * 15)));
+                    } else {
+                        float yawDiff = horse.getYRot() - horse.yHeadRot;
+                        float leanAngle = Mth.clamp(yawDiff * 2, -5.0f, 5.0f);
+                        float lean = access.horseCtrl$getLean();
+                        lean += (leanAngle - lean) * 0.2F;
+                        access.horseCtrl$setLean(lean);
+                        poseStack.mulPose(Axis.ZP.rotationDegrees(lean));
+                    }
                 }
             }
         }

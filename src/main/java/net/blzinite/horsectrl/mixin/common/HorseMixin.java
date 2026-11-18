@@ -395,16 +395,18 @@ public abstract class HorseMixin implements HorseControlAccess {
     private void horseCtrl$trample() {
         AbstractHorse horse = horseCtrl$self();
         if (!horse.level().isClientSide() && horseCtrl$getGear() > Speeds.GALLOP.getValue() && HorseCtrlConfig.trampleDamage > 0) {
-            AABB area = horse.getBoundingBox().inflate(1.2D);
+            AABB area = horse.getBoundingBox();
 
             List<LivingEntity> kickedEntities = horse.level().getEntitiesOfClass(
                     LivingEntity.class,
                     area,
-                    entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity)
+                    entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity) && entity.getVehicle() == null
             );
+            float kbx = Mth.sin((float) (horse.getYRot() * (Math.PI / 180)));
+            float kbz = -Mth.cos((float) (horse.getYRot() * (Math.PI / 180)));
 
             for (LivingEntity livingEntity : kickedEntities) {
-                livingEntity.knockback(2.5, Mth.sin((float) (horse.getYRot() * (Math.PI / 180))), -Mth.cos((float) (horse.getYRot() * (Math.PI / 180))));
+                livingEntity.knockback(2.5, kbx, kbz);
                 float damage = (float) (HorseCtrlConfig.trampleDamage);
                 livingEntity.hurt(livingEntity.damageSources().mobAttack(horse), damage);
             }
@@ -467,7 +469,10 @@ public abstract class HorseMixin implements HorseControlAccess {
 
         horseCtrl$renderSpurs(rider);
 
-        float swim = horse.isInWater() && horse.getFluidTypeHeight(NeoForgeMod.WATER_TYPE.value()) > 0 ? 0.3f : 0f;
+        float swimHeight = (5 - horseCtrl$getGear()) / 10f;
+
+        float swim = horse.isInWater() ? (float) horse.getFluidTypeHeight(NeoForgeMod.WATER_TYPE.value()) - swimHeight : 0f;
+        System.out.println(horse.getFluidTypeHeight(NeoForgeMod.WATER_TYPE.value()));
 
         int speed = horseCtrl$getGear();
         if (speed <= 0 && rider.zza < 0) {
@@ -522,7 +527,9 @@ public abstract class HorseMixin implements HorseControlAccess {
             }
             horseCtrl$updateSprintState();
             horseCtrl$rechargeSpur();
-            horseCtrl$trample();
+            if (horse.tickCount % 10 == 0) {
+                horseCtrl$trample();
+            }
         }
 
         horseCtrl$updateBodyRotation();
@@ -539,12 +546,13 @@ public abstract class HorseMixin implements HorseControlAccess {
 
             if (horse.onGround()) {
                 horse.setIsJumping(false);
-
                 if (this.playerJumpPendingScale > 0 && !horse.isJumping()) {
                     this.executeRidersJump(this.playerJumpPendingScale, travelVector);
                 }
-
                 this.playerJumpPendingScale = 0;
+            } else {
+                // Maintain Jump Velocity also speeds up swimming
+                horse.setDeltaMovement(horse.getDeltaMovement().multiply(1.05, 1, 1.05));
             }
         }
 
@@ -579,21 +587,6 @@ public abstract class HorseMixin implements HorseControlAccess {
 
 
     // ============================================================
-    // Jump
-    // ============================================================
-    @Inject(method = "executeRidersJump", at = @At("TAIL"))
-    private void horseCtrl$executeRidersJump(float power, Vec3 motion, CallbackInfo ci) {
-        if (!HorseCtrlConfig.isControlledMount(this)) {
-            return;
-        }
-
-        AbstractHorse horse = horseCtrl$self();
-        Vec3 look = horse.getLookAngle();
-        horse.setDeltaMovement(horse.getDeltaMovement().add(look.x * 0.5, 0, look.z * 0.5));
-    }
-
-
-    // ============================================================
     // Player mounting
     // ============================================================
     @Inject(method = "doPlayerRide", at = @At("TAIL"))
@@ -624,12 +617,12 @@ public abstract class HorseMixin implements HorseControlAccess {
             return;
         }
         if (shouldStand) {
-            AABB area = horse.getBoundingBox().inflate(2.0D);
+            AABB area = horse.getBoundingBox().inflate(1.5);
 
             List<LivingEntity> kickedEntities = horse.level().getEntitiesOfClass(
                     LivingEntity.class,
                     area,
-                    entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity)
+                    entity -> !(entity instanceof AbstractHorse) && !horse.getPassengers().contains(entity) && entity.getVehicle() == null
             );
 
             for (LivingEntity livingEntity : kickedEntities) {
@@ -651,6 +644,11 @@ public abstract class HorseMixin implements HorseControlAccess {
         }
 
         AbstractHorse horse = horseCtrl$self();
+
+        if (horseCtrl$getGear() >= Speeds.GALLOP.getValue()) {
+            cir.setReturnValue(false);
+            return;
+        }
 
         if (horse.getLastDamageSource() != null) {
             cir.setReturnValue(horse.hurtTime > 0 && horse.getLastDamageSource().getEntity() != null);

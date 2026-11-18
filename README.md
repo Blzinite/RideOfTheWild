@@ -2,6 +2,8 @@
 ![CurseForge Downloads](https://img.shields.io/curseforge/dt/1367264?logo=curseforge&label=CurseForge&suffix=%20&style=flat&color=242629&labelColor=F16436&logoColor=1C1C1C)
 ![Modrinth Downloads](https://img.shields.io/modrinth/dt/zelda-style-horse-controls?logo=modrinth&label=Modrinth&suffix=%20&style=flat&color=242629&labelColor=5CA424&logoColor=1C1C1C)
 
+🌐 [English](README.md) | [简体中文](README.zh-cn.md)
+
 # Controls
 * 'W' (Forward Key) to go from walk to gallop, holding it uses mouse controls
 * 'A' and 'D' to steer
@@ -18,6 +20,8 @@
 *   Spur Mechanic
 *   Horse Kicking (will damage mobs if horse rears)
 *   Horse only rears if hurt by mobs (better chance to escape from fire/cacti)
+*   Horses can swim
+*   Horses can deal trampling damage when galloping into mobs
 
 ## 🎯Upcoming Features
 
